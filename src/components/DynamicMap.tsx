@@ -13,25 +13,6 @@ const busIcon = new L.Icon({
     popupAnchor: [0, -38],
 });
 
-interface MapUpdaterProps {
-    position: [number, number] | null;
-    map: L.Map;
-}
-
-const MapUpdater = ({ position, map }: MapUpdaterProps) => {
-    useEffect(() => {
-        if (position) {
-            map.flyTo(position, 16, {
-                animate: true,
-                duration: 1.5
-            });
-        }
-    }, [position, map]);
-
-    return null;
-};
-
-
 interface DynamicMapProps {
     center: [number, number];
     busLocation: [number, number] | null;
@@ -39,8 +20,18 @@ interface DynamicMapProps {
 }
 
 const DynamicMap = ({ center, busLocation, busName = "Bus" }: DynamicMapProps) => {
+    // A unique key is used here to force a re-render of the map when the center changes.
+    // This is the simplest way to fix the "Map container is already initialized" error.
+    const mapKey = `${center[0]}-${center[1]}`;
+
     return (
-        <MapContainer center={center} zoom={15} style={{ height: '100%', width: '100%' }} className="rounded-b-lg" whenCreated={() => {}}>
+        <MapContainer 
+            key={mapKey} 
+            center={center} 
+            zoom={15} 
+            style={{ height: '100%', width: '100%' }} 
+            className="rounded-b-lg"
+        >
             <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -57,7 +48,7 @@ const DynamicMap = ({ center, busLocation, busName = "Bus" }: DynamicMapProps) =
     );
 };
 
-// This component uses useMap and will not be re-rendered
+// This component uses useMap and will not be re-rendered unless its props change.
 function MapUpdaterController({ busLocation }: { busLocation: [number, number] | null }) {
     const map = useMap();
     
@@ -72,7 +63,6 @@ function MapUpdaterController({ busLocation }: { busLocation: [number, number] |
 
     return null;
 }
-
 
 // Memoize the component to prevent re-renders unless props change
 export default memo(DynamicMap);
