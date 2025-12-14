@@ -13,20 +13,30 @@ const busIcon = new L.Icon({
     popupAnchor: [0, -38],
 });
 
-interface DynamicMapProps {
+// Component to handle map view updates
+function MapUpdater({ busLocation }: { busLocation: [number, number] | null }) {
+    const map = useMap();
+    useEffect(() => {
+        if (busLocation) {
+            map.flyTo(busLocation, map.getZoom(), {
+                animate: true,
+                duration: 1.0,
+            });
+        }
+    }, [busLocation, map]);
+    return null;
+}
+
+interface MapComponentProps {
     center: [number, number];
     busLocation: [number, number] | null;
     busName?: string;
 }
 
-const DynamicMap = ({ center, busLocation, busName = "Bus" }: DynamicMapProps) => {
-    // A unique key is used here to force a re-render of the map when the center changes.
-    // This is the simplest way to fix the "Map container is already initialized" error.
-    const mapKey = `${center[0]}-${center[1]}`;
-
+// Memoized map component to prevent re-renders
+const MapComponent = memo(({ center, busLocation, busName }: MapComponentProps) => {
     return (
         <MapContainer 
-            key={mapKey} 
             center={center} 
             zoom={15} 
             style={{ height: '100%', width: '100%' }} 
@@ -38,31 +48,18 @@ const DynamicMap = ({ center, busLocation, busName = "Bus" }: DynamicMapProps) =
             />
             {busLocation && (
                 <Marker position={busLocation} icon={busIcon}>
-                    <Popup>
-                        {busName} is here.
-                    </Popup>
+                    <Popup>{busName} is here.</Popup>
                 </Marker>
             )}
-            <MapUpdaterController busLocation={busLocation} />
+            <MapUpdater busLocation={busLocation} />
         </MapContainer>
     );
+});
+MapComponent.displayName = 'MapComponent';
+
+// Main export component
+const DynamicMap = (props: MapComponentProps) => {
+    return <MapComponent {...props} />;
 };
 
-// This component uses useMap and will not be re-rendered unless its props change.
-function MapUpdaterController({ busLocation }: { busLocation: [number, number] | null }) {
-    const map = useMap();
-    
-    useEffect(() => {
-        if (busLocation) {
-            map.flyTo(busLocation, map.getZoom(), {
-                animate: true,
-                duration: 1.0,
-            });
-        }
-    }, [busLocation, map]);
-
-    return null;
-}
-
-// Memoize the component to prevent re-renders unless props change
-export default memo(DynamicMap);
+export default DynamicMap;
