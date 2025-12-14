@@ -3,8 +3,9 @@
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { useEffect } from 'react';
+import { useEffect, memo } from 'react';
 
+// Using a public asset for the icon
 const busIcon = new L.Icon({
     iconUrl: '/bus-icon.svg',
     iconSize: [38, 38],
@@ -13,14 +14,13 @@ const busIcon = new L.Icon({
 });
 
 interface MapUpdaterProps {
-    position: [number, number];
+    position: [number, number] | null;
+    map: L.Map;
 }
 
-function MapUpdater({ position }: MapUpdaterProps) {
-    const map = useMap();
+const MapUpdater = ({ position, map }: MapUpdaterProps) => {
     useEffect(() => {
-        // Check if position is valid (not default 0,0) before flying
-        if (position && position[0] !== 0 && position[1] !== 0) {
+        if (position) {
             map.flyTo(position, 16, {
                 animate: true,
                 duration: 1.5
@@ -29,32 +29,50 @@ function MapUpdater({ position }: MapUpdaterProps) {
     }, [position, map]);
 
     return null;
-}
+};
+
 
 interface DynamicMapProps {
-    position: [number, number];
+    center: [number, number];
+    busLocation: [number, number] | null;
     busName?: string;
 }
 
-const DynamicMap = ({ position, busName = "Bus" }: DynamicMapProps) => {
-    const isPositionValid = position && position[0] !== 0 && position[1] !== 0;
-
+const DynamicMap = ({ center, busLocation, busName = "Bus" }: DynamicMapProps) => {
     return (
-        <MapContainer center={position} zoom={15} style={{ height: '100%', width: '100%' }} className="rounded-b-lg">
+        <MapContainer center={center} zoom={15} style={{ height: '100%', width: '100%' }} className="rounded-b-lg" whenCreated={() => {}}>
             <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
-            {isPositionValid && (
-                <Marker position={position} icon={busIcon}>
+            {busLocation && (
+                <Marker position={busLocation} icon={busIcon}>
                     <Popup>
                         {busName} is here.
                     </Popup>
                 </Marker>
             )}
-            <MapUpdater position={position} />
+            <MapUpdaterController busLocation={busLocation} />
         </MapContainer>
     );
 };
 
-export default DynamicMap;
+// This component uses useMap and will not be re-rendered
+function MapUpdaterController({ busLocation }: { busLocation: [number, number] | null }) {
+    const map = useMap();
+    
+    useEffect(() => {
+        if (busLocation) {
+            map.flyTo(busLocation, map.getZoom(), {
+                animate: true,
+                duration: 1.0,
+            });
+        }
+    }, [busLocation, map]);
+
+    return null;
+}
+
+
+// Memoize the component to prevent re-renders unless props change
+export default memo(DynamicMap);

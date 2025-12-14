@@ -46,6 +46,8 @@ export default function StudentPage() {
 
       return () => {
         off(busRef, 'value', listener);
+        setBusLocation(null);
+        setIsBusOnline(false);
       };
     } else {
       setBusLocation(null);
@@ -100,7 +102,13 @@ export default function StudentPage() {
                 )}
              </CardHeader>
              <CardContent className="h-[calc(100%-7rem)] p-0">
-               <DynamicMap position={busLocation ?? defaultPosition} busName={selectedBusRoute?.name} />
+               {selectedBusId ? (
+                <DynamicMap center={defaultPosition} busLocation={busLocation} busName={selectedBusRoute?.name} />
+               ) : (
+                <div className="h-full w-full bg-muted flex items-center justify-center rounded-b-lg">
+                  <p className="text-muted-foreground">Select a bus to see its location on the map.</p>
+                </div>
+               )}
              </CardContent>
           </Card>
         </div>
