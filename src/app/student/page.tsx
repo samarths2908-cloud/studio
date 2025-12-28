@@ -12,10 +12,12 @@ import DynamicMap from "@/components/DynamicMapWrapper";
 import { ArrowLeft, Map, Route } from 'lucide-react';
 import Link from 'next/link';
 
+const ONLINE_THRESHOLD_MS = 15000; // 15 seconds
+
 export default function StudentPage() {
   const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
   const [busLocation, setBusLocation] = useState<[number, number] | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [isBusOnline, setIsBusOnline] = useState(false);
 
   const selectedBusRoute: BusRoute | undefined = useMemo(() => 
@@ -29,12 +31,14 @@ export default function StudentPage() {
       
       const listener = onValue(busRef, (snapshot) => {
         const data = snapshot.val();
-        if (data && data.lat && data.lng) {
+        if (data && data.lat && data.lng && data.timestamp) {
           setBusLocation([data.lat, data.lng]);
-          setLastUpdated(new Date(data.timestamp).toLocaleTimeString());
-          setIsBusOnline(true);
+          setLastUpdated(data.timestamp);
+          const difference = Date.now() - data.timestamp;
+          setIsBusOnline(difference <= ONLINE_THRESHOLD_MS);
         } else {
           setBusLocation(null);
+          setLastUpdated(null);
           setIsBusOnline(false);
         }
       });
@@ -42,13 +46,29 @@ export default function StudentPage() {
       return () => {
         off(busRef, 'value', listener);
         setBusLocation(null);
+        setLastUpdated(null);
         setIsBusOnline(false);
       };
     } else {
       setBusLocation(null);
+      setLastUpdated(null);
       setIsBusOnline(false);
     }
   }, [selectedBusId]);
+
+  // Effect to check status periodically even if no new data arrives
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (lastUpdated) {
+        const difference = Date.now() - lastUpdated;
+        if (difference > ONLINE_THRESHOLD_MS) {
+          setIsBusOnline(false);
+        }
+      }
+    }, 5000); // Check every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [lastUpdated]);
 
   const defaultPosition: [number, number] = useMemo(() => [12.86, 74.93], []); // Approx college location
 
@@ -92,7 +112,7 @@ export default function StudentPage() {
                 {selectedBusId && (
                   <div className={`text-sm flex items-center gap-2 ${isBusOnline ? 'text-green-600' : 'text-red-500'}`}>
                     <span className={`h-2 w-2 rounded-full ${isBusOnline ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                    {isBusOnline ? `Online (Updated: ${lastUpdated})` : 'Offline'}
+                    {isBusOnline ? `Online (Updated: ${lastUpdated ? new Date(lastUpdated).toLocaleTimeString() : 'N/A'})` : 'Offline'}
                   </div>
                 )}
              </CardHeader>
