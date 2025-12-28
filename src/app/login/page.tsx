@@ -18,7 +18,7 @@ export default function LoginPage() {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     // Simple hardcoded credentials for demonstration
-    if (username === "driver" && password === "password") {
+    if (password === "M5DQ051G1GT") {
       // In a real app, you'd use a more secure method for session management.
       // For this prototype, sessionStorage is sufficient.
       sessionStorage.setItem("driver_logged_in", "true");
