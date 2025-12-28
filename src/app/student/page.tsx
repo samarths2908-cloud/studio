@@ -12,7 +12,7 @@ import DynamicMap from "@/components/DynamicMapWrapper";
 import { ArrowLeft, Map, Route } from 'lucide-react';
 import Link from 'next/link';
 
-const ONLINE_THRESHOLD_MS = 20000; // Increased to 20 seconds for more tolerance
+const ONLINE_THRESHOLD_MS = 15000; // 15 seconds
 
 export default function StudentPage() {
   const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
@@ -25,60 +25,61 @@ export default function StudentPage() {
     busRoutes.find(route => route.id.toString() === selectedBusId), 
   [selectedBusId]);
 
+  // Effect to get data from Firebase
   useEffect(() => {
-    let busRef: any;
-    let timer: NodeJS.Timeout;
-
-    const clearState = () => {
+    if (!selectedBusId) {
       setBusLocation(null);
       setLastUpdated(null);
-      setIsBusOnline(false);
-      setStatusMessage('Offline');
-    };
-
-    if (selectedBusId) {
-      busRef = ref(database, `busLocations/bus_${selectedBusId}`);
-      
-      const listener = onValue(busRef, (snapshot) => {
-        const data = snapshot.val();
-        if (data && data.timestamp) {
-          const now = Date.now();
-          const difference = now - data.timestamp;
-          
-          if (difference <= ONLINE_THRESHOLD_MS) {
-            if (data.lat && data.lng) {
-              setBusLocation([data.lat, data.lng]);
-            }
-            setLastUpdated(data.timestamp);
-            setIsBusOnline(true);
-            setStatusMessage(`Online (Updated: ${new Date(data.timestamp).toLocaleTimeString()})`);
-          } else {
-            clearState();
-          }
-        } else {
-          clearState();
-        }
-      });
-
-      // A safety timer. If we don't hear from Firebase for a while, mark as offline.
-      timer = setInterval(() => {
-        if (lastUpdated && (Date.now() - lastUpdated > ONLINE_THRESHOLD_MS)) {
-          clearState();
-        }
-      }, 5000); // Checks every 5 seconds.
-
-
-      // Cleanup function when component unmounts or selectedBusId changes
-      return () => {
-        off(busRef, 'value', listener);
-        clearInterval(timer);
-        clearState();
-      };
-    } else {
-      // Clear all state when no bus is selected
-      clearState();
+      return;
     }
-  }, [selectedBusId, lastUpdated]); // Rerun effect if lastUpdated changes to manage timer correctly
+
+    const busRef = ref(database, `busLocations/bus_${selectedBusId}`);
+    
+    const listener = onValue(busRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data?.lat && data?.lng && data?.timestamp) {
+        setBusLocation([data.lat, data.lng]);
+        setLastUpdated(data.timestamp);
+      } else {
+        // If data is invalid or removed from firebase, clear it
+        setBusLocation(null);
+        setLastUpdated(null);
+      }
+    });
+
+    // Cleanup listener on bus change or unmount
+    return () => {
+      off(busRef, 'value', listener);
+    };
+  }, [selectedBusId]);
+
+  // Effect with timer to check if bus is online
+  useEffect(() => {
+    if (!lastUpdated) {
+      setIsBusOnline(false);
+      return;
+    }
+
+    // Check immediately on first run
+    const initialDifference = Date.now() - lastUpdated;
+    setIsBusOnline(initialDifference <= ONLINE_THRESHOLD_MS);
+
+    const interval = setInterval(() => {
+      const difference = Date.now() - lastUpdated;
+      setIsBusOnline(difference <= ONLINE_THRESHOLD_MS);
+    }, 2000); // check every 2 seconds
+
+    return () => clearInterval(interval);
+  }, [lastUpdated]);
+
+  // Effect to update the human-readable status message
+  useEffect(() => {
+    if (isBusOnline && lastUpdated) {
+      setStatusMessage(`Online (Updated: ${new Date(lastUpdated).toLocaleTimeString()})`);
+    } else {
+      setStatusMessage('Offline');
+    }
+  }, [isBusOnline, lastUpdated]);
 
   const defaultPosition: [number, number] = useMemo(() => [12.86, 74.93], []); // Approx college location
 
@@ -95,7 +96,13 @@ export default function StudentPage() {
             <h1 className="text-2xl font-bold text-primary font-headline">Student Dashboard</h1>
           </div>
           <div className="w-full max-w-xs">
-            <Select onValueChange={setSelectedBusId}>
+            <Select onValueChange={(value) => {
+                setSelectedBusId(value);
+                // Reset state when bus changes for a clean transition
+                setBusLocation(null);
+                setLastUpdated(null);
+                setIsBusOnline(false);
+            }}>
               <SelectTrigger>
                 <SelectValue placeholder="Select a bus to track..." />
               </SelectTrigger>
