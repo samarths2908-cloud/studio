@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { database } from "@/lib/firebase";
-import { ref, set, onDisconnect, serverTimestamp, remove } from "firebase/database";
+import { ref, set, onDisconnect, remove } from "firebase/database";
 import { useToast } from "@/hooks/use-toast";
 import { LocateFixed, MapPin, Power, PowerOff, ArrowLeft, LogOut } from "lucide-react";
 import Link from 'next/link';
@@ -54,7 +54,7 @@ export default function DriverPage() {
     watchId.current = navigator.geolocation.watchPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
-        const newLocation = { lat: latitude, lng: longitude, timestamp: serverTimestamp() };
+        const newLocation = { lat: latitude, lng: longitude, timestamp: Date.now() };
         set(busRef, newLocation);
         setLocation({ lat: latitude, lng: longitude });
         setIsSharing(true);
