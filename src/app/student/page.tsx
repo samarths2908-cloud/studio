@@ -50,6 +50,7 @@ export default function StudentPage() {
         setIsBusOnline(false);
       };
     } else {
+      // Clear all state when no bus is selected
       setBusLocation(null);
       setLastUpdated(null);
       setIsBusOnline(false);
