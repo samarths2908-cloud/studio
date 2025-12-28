@@ -1,11 +1,10 @@
 "use client";
 
+import React, { useEffect, useRef, memo } from "react";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { useEffect, useRef, memo } from "react";
 
-// Using a public asset for the icon
 const busIcon = new L.Icon({
   iconUrl: "/bus-icon.svg",
   iconSize: [38, 38],
@@ -13,15 +12,11 @@ const busIcon = new L.Icon({
   popupAnchor: [0, -38],
 });
 
-// Component to handle map view updates
 function MapUpdater({ busLocation }: { busLocation: [number, number] | null }) {
   const map = useMap();
   useEffect(() => {
     if (busLocation) {
-      map.flyTo(busLocation, map.getZoom(), {
-        animate: true,
-        duration: 1.0,
-      });
+      map.flyTo(busLocation, map.getZoom(), { animate: true, duration: 1.0 });
     }
   }, [busLocation, map]);
   return null;
@@ -33,30 +28,47 @@ interface MapComponentProps {
   busName?: string;
 }
 
-// Memoized map component to prevent re-renders
-const MapComponent = memo(({ center, busLocation, busName }: MapComponentProps) => {
-  // Keep a ref to the Leaflet map instance so we can remove it on unmount
+const MapComponent = memo(function MapComponent({
+  center,
+  busLocation,
+  busName,
+}: MapComponentProps) {
+  // Hooks must be at top level
   const mapRef = useRef<L.Map | null>(null);
 
-  // cleanup map on unmount to avoid "Map container is already initialized" error
+  // Clean up map on unmount
   useEffect(() => {
     return () => {
       if (mapRef.current) {
-        // remove the map instance and clear ref
-        mapRef.current.remove();
+        try {
+          mapRef.current.remove();
+        } catch (e) {
+          /* ignore */
+        }
         mapRef.current = null;
       }
     };
   }, []);
 
+  // Optional: force new mount when center changes (helps in strict/development)
+  const mapKey = `${center[0]}-${center[1]}`;
+
   return (
     <MapContainer
+      key={mapKey}
       center={center}
       zoom={15}
       style={{ height: "100%", width: "100%" }}
       className="rounded-b-lg"
-      // whenCreated gives us the map instance; store it in mapRef
       whenCreated={(mapInstance) => {
+        // If an older instance exists, remove it first
+        if (mapRef.current && mapRef.current !== mapInstance) {
+          try {
+            mapRef.current.remove();
+          } catch (e) {
+            /* ignore */
+          }
+        }
         mapRef.current = mapInstance;
       }}
     >
@@ -75,9 +87,4 @@ const MapComponent = memo(({ center, busLocation, busName }: MapComponentProps) 
 });
 MapComponent.displayName = "MapComponent";
 
-// Main export component
-const DynamicMap = (props: MapComponentProps) => {
-  return <MapComponent {...props} />;
-};
-
-export default DynamicMap;
+export default MapComponent;
