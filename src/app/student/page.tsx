@@ -8,14 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { database } from '@/lib/firebase';
 import { ref, onValue, off } from 'firebase/database';
-import dynamic from 'next/dynamic';
+import DynamicMap from "@/components/DynamicMapWrapper";
 import { ArrowLeft, Map, Route } from 'lucide-react';
 import Link from 'next/link';
-
-const DynamicMap = dynamic(() => import('@/components/DynamicMap'), {
-  ssr: false,
-  loading: () => <div className="h-full w-full bg-muted animate-pulse flex items-center justify-center"><p className="text-muted-foreground">Loading map...</p></div>,
-});
 
 export default function StudentPage() {
   const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
