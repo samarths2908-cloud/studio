@@ -1,8 +1,9 @@
+
 "use client";
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { busRoutes } from "@/lib/bus-data";
+import { busRoutes } from "@/data/busRoutes";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -46,7 +47,7 @@ export default function DriverPage() {
       return;
     }
 
-    const busRef = ref(database, `busLocations/bus_${selectedBus}`);
+    const busRef = ref(database, `busLocations/${selectedBus}`);
     
     // Ensure location is removed if the driver disconnects unexpectedly
     onDisconnect(busRef).remove();
@@ -58,7 +59,7 @@ export default function DriverPage() {
         set(busRef, newLocation);
         setLocation({ lat: latitude, lng: longitude });
         setIsSharing(true);
-        setStatus(`Sharing location for Bus ${selectedBus}`);
+        setStatus(`Sharing location for ${selectedBus}`);
       },
       (error) => {
         let errorMessage = "An unknown error occurred.";
@@ -88,7 +89,7 @@ export default function DriverPage() {
       watchId.current = null;
     }
     if (selectedBus) {
-      const busRef = ref(database, `busLocations/bus_${selectedBus}`);
+      const busRef = ref(database, `busLocations/${selectedBus}`);
       remove(busRef); // Remove location from Firebase
       onDisconnect(busRef).cancel(); // Cancel the onDisconnect handler
     }
@@ -136,9 +137,9 @@ export default function DriverPage() {
                 <SelectValue placeholder="Choose a bus number..." />
               </SelectTrigger>
               <SelectContent>
-                {busRoutes.map((route) => (
-                  <SelectItem key={route.id} value={String(route.id)}>
-                    {route.name}
+                {Object.keys(busRoutes).map((busName) => (
+                  <SelectItem key={busName} value={busName}>
+                    {busName.replace('Bus', 'Bus ')}
                   </SelectItem>
                 ))}
               </SelectContent>

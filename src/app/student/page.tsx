@@ -1,7 +1,8 @@
+
 "use client";
 
 import { useState, useEffect, useMemo } from 'react';
-import { busRoutes, type BusRoute } from '@/lib/bus-data';
+import { busRoutes } from '@/data/busRoutes';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -11,18 +12,42 @@ import { ref, onValue, off } from 'firebase/database';
 import DynamicMap from "@/components/DynamicMapWrapper";
 import { ArrowLeft, Map, Route } from 'lucide-react';
 import Link from 'next/link';
+import { cn } from '@/lib/utils';
 
 const ONLINE_THRESHOLD_MS = 15000; // 15 seconds
+const ACTIVE_STOP_THRESHOLD_METERS = 500; // 500 meters
+
+type Stop = { id: string; name: string; coords: [number, number] };
+type BusLocation = [number, number];
+
+// Haversine distance formula to calculate distance between two lat/lng points in meters
+const haversineDistance = (coords1: BusLocation, coords2: [number, number]): number => {
+  const toRad = (x: number) => (x * Math.PI) / 180;
+  const R = 6371e3; // Earth radius in meters
+
+  const dLat = toRad(coords2[0] - coords1[0]);
+  const dLon = toRad(coords2[1] - coords1[1]);
+  const lat1 = toRad(coords1[0]);
+  const lat2 = toRad(coords2[0]);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+};
 
 export default function StudentPage() {
   const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
-  const [busLocation, setBusLocation] = useState<[number, number] | null>(null);
+  const [busLocation, setBusLocation] = useState<BusLocation | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [isBusOnline, setIsBusOnline] = useState(false);
   const [statusMessage, setStatusMessage] = useState('Offline');
+  const [activeStopId, setActiveStopId] = useState<string | null>(null);
 
-  const selectedBusRoute: BusRoute | undefined = useMemo(() => 
-    busRoutes.find(route => route.id.toString() === selectedBusId), 
+  const selectedBusRoute: Stop[] | undefined = useMemo(() => 
+    selectedBusId ? busRoutes[selectedBusId] : undefined, 
   [selectedBusId]);
 
   // Effect to get data from Firebase
@@ -33,7 +58,7 @@ export default function StudentPage() {
       return;
     }
 
-    const busRef = ref(database, `busLocations/bus_${selectedBusId}`);
+    const busRef = ref(database, `busLocations/${selectedBusId}`);
     
     const listener = onValue(busRef, (snapshot) => {
       const data = snapshot.val();
@@ -41,13 +66,11 @@ export default function StudentPage() {
         setBusLocation([data.lat, data.lng]);
         setLastUpdated(data.timestamp);
       } else {
-        // If data is invalid or removed from firebase, clear it
         setBusLocation(null);
         setLastUpdated(null);
       }
     });
 
-    // Cleanup listener on bus change or unmount
     return () => {
       off(busRef, 'value', listener);
     };
@@ -60,17 +83,40 @@ export default function StudentPage() {
       return;
     }
 
-    // Check immediately on first run
-    const initialDifference = Date.now() - lastUpdated;
-    setIsBusOnline(initialDifference <= ONLINE_THRESHOLD_MS);
+    const checkStatus = () => {
+        const difference = Date.now() - lastUpdated;
+        setIsBusOnline(difference <= ONLINE_THRESHOLD_MS);
+    };
 
-    const interval = setInterval(() => {
-      const difference = Date.now() - lastUpdated;
-      setIsBusOnline(difference <= ONLINE_THRESHOLD_MS);
-    }, 2000); // check every 2 seconds
+    checkStatus(); // Check immediately on first run
+    const interval = setInterval(checkStatus, 2000); // check every 2 seconds
 
     return () => clearInterval(interval);
   }, [lastUpdated]);
+
+  // Effect to find the nearest stop
+  useEffect(() => {
+    if (busLocation && selectedBusRoute) {
+      let closestStop: Stop | null = null;
+      let minDistance = Infinity;
+
+      selectedBusRoute.forEach(stop => {
+        const distance = haversineDistance(busLocation, stop.coords);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestStop = stop;
+        }
+      });
+
+      if (closestStop && minDistance <= ACTIVE_STOP_THRESHOLD_METERS) {
+        setActiveStopId(closestStop.id);
+      } else {
+        setActiveStopId(null);
+      }
+    } else {
+      setActiveStopId(null);
+    }
+  }, [busLocation, selectedBusRoute]);
 
   // Effect to update the human-readable status message
   useEffect(() => {
@@ -81,7 +127,7 @@ export default function StudentPage() {
     }
   }, [isBusOnline, lastUpdated]);
 
-  const defaultPosition: [number, number] = useMemo(() => [12.86, 74.93], []); // Approx college location
+  const defaultPosition: [number, number] = useMemo(() => [12.86, 74.93], []);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -98,18 +144,18 @@ export default function StudentPage() {
           <div className="w-full max-w-xs">
             <Select onValueChange={(value) => {
                 setSelectedBusId(value);
-                // Reset state when bus changes for a clean transition
                 setBusLocation(null);
                 setLastUpdated(null);
                 setIsBusOnline(false);
+                setActiveStopId(null);
             }}>
               <SelectTrigger>
                 <SelectValue placeholder="Select a bus to track..." />
               </SelectTrigger>
               <SelectContent>
-                {busRoutes.map((route) => (
-                  <SelectItem key={route.id} value={String(route.id)}>
-                    {route.name}
+                {Object.keys(busRoutes).map((busName) => (
+                  <SelectItem key={busName} value={busName}>
+                    {busName.replace('Bus', 'Bus ')}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -135,7 +181,7 @@ export default function StudentPage() {
              </CardHeader>
              <CardContent className="h-[calc(100%-7rem)] p-0">
                {selectedBusId ? (
-                <DynamicMap center={defaultPosition} busLocation={busLocation} busName={selectedBusRoute?.name} />
+                <DynamicMap center={defaultPosition} busLocation={busLocation} busName={selectedBusId} />
                ) : (
                 <div className="h-full w-full bg-muted flex items-center justify-center rounded-b-lg">
                   <p className="text-muted-foreground">Select a bus to see its location on the map.</p>
@@ -154,18 +200,24 @@ export default function StudentPage() {
               <CardContent>
                 {selectedBusRoute ? (
                   <>
-                    <CardDescription className="mb-4">Showing stops for {selectedBusRoute.name}.</CardDescription>
+                    <CardDescription className="mb-4">Showing stops for {selectedBusId?.replace('Bus', 'Bus ')}.</CardDescription>
                     <ScrollArea className="h-[calc(65vh-6rem)]">
                         <ul className="space-y-3">
-                          {selectedBusRoute.stops.map((stop, index) => (
-                            <li key={index} className="flex items-center gap-4">
+                          {selectedBusRoute.map((stop, index) => (
+                            <li key={stop.id} className={cn("flex items-center gap-4 p-2 rounded-md transition-colors", {
+                                "bg-primary/10": stop.id === activeStopId
+                            })}>
                               <div className="flex flex-col items-center justify-center">
-                                <div className="w-4 h-4 rounded-full border-2 border-primary bg-background" />
-                                {index < selectedBusRoute.stops.length - 1 && (
+                                <div className={cn("w-4 h-4 rounded-full border-2 border-primary", {
+                                    "bg-primary ring-4 ring-primary/20": stop.id === activeStopId
+                                })} />
+                                {index < selectedBusRoute.length - 1 && (
                                   <div className="w-px h-6 bg-border" />
                                 )}
                               </div>
-                              <span className="font-medium text-sm text-foreground/90">{stop}</span>
+                              <span className={cn("font-medium text-sm text-foreground/90", {
+                                "font-bold text-primary": stop.id === activeStopId
+                              })}>{stop.name}</span>
                             </li>
                           ))}
                         </ul>
