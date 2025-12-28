@@ -12,13 +12,14 @@ import DynamicMap from "@/components/DynamicMapWrapper";
 import { ArrowLeft, Map, Route } from 'lucide-react';
 import Link from 'next/link';
 
-const ONLINE_THRESHOLD_MS = 15000; // 15 seconds
+const ONLINE_THRESHOLD_MS = 20000; // Increased to 20 seconds for more tolerance
 
 export default function StudentPage() {
   const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
   const [busLocation, setBusLocation] = useState<[number, number] | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [isBusOnline, setIsBusOnline] = useState(false);
+  const [statusMessage, setStatusMessage] = useState('Offline');
 
   const selectedBusRoute: BusRoute | undefined = useMemo(() => 
     busRoutes.find(route => route.id.toString() === selectedBusId), 
@@ -26,50 +27,58 @@ export default function StudentPage() {
 
   useEffect(() => {
     let busRef: any;
+    let timer: NodeJS.Timeout;
+
+    const clearState = () => {
+      setBusLocation(null);
+      setLastUpdated(null);
+      setIsBusOnline(false);
+      setStatusMessage('Offline');
+    };
+
     if (selectedBusId) {
       busRef = ref(database, `busLocations/bus_${selectedBusId}`);
       
       const listener = onValue(busRef, (snapshot) => {
         const data = snapshot.val();
-        if (data && data.lat && data.lng && data.timestamp) {
-          setBusLocation([data.lat, data.lng]);
-          setLastUpdated(data.timestamp);
-          const difference = Date.now() - data.timestamp;
-          setIsBusOnline(difference <= ONLINE_THRESHOLD_MS);
+        if (data && data.timestamp) {
+          const now = Date.now();
+          const difference = now - data.timestamp;
+          
+          if (difference <= ONLINE_THRESHOLD_MS) {
+            if (data.lat && data.lng) {
+              setBusLocation([data.lat, data.lng]);
+            }
+            setLastUpdated(data.timestamp);
+            setIsBusOnline(true);
+            setStatusMessage(`Online (Updated: ${new Date(data.timestamp).toLocaleTimeString()})`);
+          } else {
+            clearState();
+          }
         } else {
-          setBusLocation(null);
-          setLastUpdated(null);
-          setIsBusOnline(false);
+          clearState();
         }
       });
 
+      // A safety timer. If we don't hear from Firebase for a while, mark as offline.
+      timer = setInterval(() => {
+        if (lastUpdated && (Date.now() - lastUpdated > ONLINE_THRESHOLD_MS)) {
+          clearState();
+        }
+      }, 5000); // Checks every 5 seconds.
+
+
+      // Cleanup function when component unmounts or selectedBusId changes
       return () => {
         off(busRef, 'value', listener);
-        setBusLocation(null);
-        setLastUpdated(null);
-        setIsBusOnline(false);
+        clearInterval(timer);
+        clearState();
       };
     } else {
       // Clear all state when no bus is selected
-      setBusLocation(null);
-      setLastUpdated(null);
-      setIsBusOnline(false);
+      clearState();
     }
-  }, [selectedBusId]);
-
-  // Effect to check status periodically even if no new data arrives
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (lastUpdated) {
-        const difference = Date.now() - lastUpdated;
-        if (difference > ONLINE_THRESHOLD_MS) {
-          setIsBusOnline(false);
-        }
-      }
-    }, 5000); // Check every 5 seconds
-
-    return () => clearInterval(interval);
-  }, [lastUpdated]);
+  }, [selectedBusId, lastUpdated]); // Rerun effect if lastUpdated changes to manage timer correctly
 
   const defaultPosition: [number, number] = useMemo(() => [12.86, 74.93], []); // Approx college location
 
@@ -113,7 +122,7 @@ export default function StudentPage() {
                 {selectedBusId && (
                   <div className={`text-sm flex items-center gap-2 ${isBusOnline ? 'text-green-600' : 'text-red-500'}`}>
                     <span className={`h-2 w-2 rounded-full ${isBusOnline ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                    {isBusOnline ? `Online (Updated: ${lastUpdated ? new Date(lastUpdated).toLocaleTimeString() : 'N/A'})` : 'Offline'}
+                    {statusMessage}
                   </div>
                 )}
              </CardHeader>
