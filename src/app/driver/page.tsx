@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { busRoutes } from "@/lib/bus-data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -8,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { database } from "@/lib/firebase";
 import { ref, set, onDisconnect, serverTimestamp, remove } from "firebase/database";
 import { useToast } from "@/hooks/use-toast";
-import { LocateFixed, MapPin, Power, PowerOff, ArrowLeft } from "lucide-react";
+import { LocateFixed, MapPin, Power, PowerOff, ArrowLeft, LogOut } from "lucide-react";
 import Link from 'next/link';
 
 export default function DriverPage() {
@@ -18,6 +19,21 @@ export default function DriverPage() {
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const watchId = useRef<number | null>(null);
   const { toast } = useToast();
+  const router = useRouter();
+
+  useEffect(() => {
+    const isLoggedIn = sessionStorage.getItem("driver_logged_in");
+    if (isLoggedIn !== "true") {
+      router.replace("/login");
+    }
+  }, [router]);
+
+  const handleLogout = () => {
+    sessionStorage.removeItem("driver_logged_in");
+    handleStopSharing();
+    router.push("/");
+  };
+
 
   const handleStartSharing = () => {
     if (!selectedBus) {
@@ -91,11 +107,17 @@ export default function DriverPage() {
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
-       <Link href="/" className="absolute top-4 left-4">
-        <Button variant="outline" size="icon">
-          <ArrowLeft className="h-4 w-4" />
+       <div className="absolute top-4 left-4 flex gap-2">
+         <Link href="/">
+          <Button variant="outline" size="icon" aria-label="Go back">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        </Link>
+         <Button variant="outline" size="icon" aria-label="Logout" onClick={handleLogout}>
+            <LogOut className="h-4 w-4" />
         </Button>
-      </Link>
+      </div>
+
       <Card className="w-full max-w-md shadow-2xl">
         <CardHeader>
           <div className="flex items-center gap-3">
