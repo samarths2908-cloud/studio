@@ -13,44 +13,32 @@ import DynamicMap from "@/components/DynamicMapWrapper";
 import { ArrowLeft, Map, Route } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
+import { useMap } from 'react-leaflet';
 
 const ONLINE_THRESHOLD_MS = 15000; // 15 seconds
 const ACTIVE_STOP_THRESHOLD_METERS = 500; // 500 meters
 
-type Stop = { id: string; name: string; coords: [number, number] };
 type BusLocation = [number, number];
+type Stop = { id: string; name: string; coords: [number, number] };
 
-// Haversine distance formula to calculate distance between two lat/lng points in meters
+// Haversine distance formula
 const haversineDistance = (coords1: BusLocation, coords2: [number, number]): number => {
   const toRad = (x: number) => (x * Math.PI) / 180;
-  const R = 6371e3; // Earth radius in meters
-
+  const R = 6371e3;
   const dLat = toRad(coords2[0] - coords1[0]);
   const dLon = toRad(coords2[1] - coords1[1]);
   const lat1 = toRad(coords1[0]);
   const lat2 = toRad(coords2[0]);
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
   return R * c;
 };
 
-export default function StudentPage() {
-  const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
+// Custom hook to listen to Firebase for bus location
+function useBusLocation(selectedBusId: string | null) {
   const [busLocation, setBusLocation] = useState<BusLocation | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
-  const [isBusOnline, setIsBusOnline] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('Offline');
-  const [activeStopId, setActiveStopId] = useState<string | null>(null);
 
-  const selectedBusRoute: Stop[] | undefined = useMemo(() => 
-    selectedBusId ? busRoutes[selectedBusId] : undefined, 
-  [selectedBusId]);
-
-  // Effect to get data from Firebase
   useEffect(() => {
     if (!selectedBusId) {
       setBusLocation(null);
@@ -59,11 +47,14 @@ export default function StudentPage() {
     }
 
     const busRef = ref(database, `busLocations/${selectedBusId}`);
-    
+
     const listener = onValue(busRef, (snapshot) => {
       const data = snapshot.val();
-      if (data?.lat && data?.lng && data?.timestamp) {
-        setBusLocation([data.lat, data.lng]);
+      const isValidNumber = (v: any) => typeof v === "number" && Number.isFinite(v);
+
+      if (data && isValidNumber(data.lat) && isValidNumber(data.lng) && isValidNumber(data.timestamp)) {
+        const markerPosition: BusLocation = [Number(data.lat), Number(data.lng)];
+        setBusLocation(markerPosition);
         setLastUpdated(data.timestamp);
       } else {
         setBusLocation(null);
@@ -72,11 +63,26 @@ export default function StudentPage() {
     });
 
     return () => {
-      off(busRef, 'value', listener);
+      off(busRef, "value", listener);
     };
   }, [selectedBusId]);
 
-  // Effect with timer to check if bus is online
+  return { busLocation, lastUpdated };
+}
+
+
+export default function StudentPage() {
+  const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
+  const { busLocation, lastUpdated } = useBusLocation(selectedBusId);
+  const [isBusOnline, setIsBusOnline] = useState(false);
+  const [statusMessage, setStatusMessage] = useState('Offline');
+  const [activeStopId, setActiveStopId] = useState<string | null>(null);
+
+  const selectedBusRoute: Stop[] | undefined = useMemo(() => 
+    selectedBusId ? busRoutes[selectedBusId] : undefined, 
+  [selectedBusId]);
+
+  // Effect for online/offline status check using a timer
   useEffect(() => {
     if (!lastUpdated) {
       setIsBusOnline(false);
@@ -88,8 +94,8 @@ export default function StudentPage() {
         setIsBusOnline(difference <= ONLINE_THRESHOLD_MS);
     };
 
-    checkStatus(); // Check immediately on first run
-    const interval = setInterval(checkStatus, 2000); // check every 2 seconds
+    checkStatus();
+    const interval = setInterval(checkStatus, 2000);
 
     return () => clearInterval(interval);
   }, [lastUpdated]);
@@ -127,7 +133,7 @@ export default function StudentPage() {
     }
   }, [isBusOnline, lastUpdated]);
 
-  const defaultPosition: [number, number] = useMemo(() => [12.86, 74.93], []);
+  const defaultPosition: [number, number] = useMemo(() => [12.9017, 74.9995], []);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -181,7 +187,7 @@ export default function StudentPage() {
              </CardHeader>
              <CardContent className="h-[calc(100%-7rem)] p-0">
                {selectedBusId ? (
-                <DynamicMap center={defaultPosition} busLocation={busLocation} busName={selectedBusId} />
+                <DynamicMap center={busLocation ?? defaultPosition} busLocation={busLocation} busName={selectedBusId} />
                ) : (
                 <div className="h-full w-full bg-muted flex items-center justify-center rounded-b-lg">
                   <p className="text-muted-foreground">Select a bus to see its location on the map.</p>
@@ -235,3 +241,4 @@ export default function StudentPage() {
     </div>
   );
 }
+

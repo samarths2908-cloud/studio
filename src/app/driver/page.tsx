@@ -8,8 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { database } from "@/lib/firebase";
-import { ref, set, onDisconnect, remove } from "firebase/database";
-import { useToast } from "@/hooks/use-toast";
+import { ref, set } from "firebase/database";
 import { LocateFixed, MapPin, Power, PowerOff, ArrowLeft, LogOut } from "lucide-react";
 import Link from 'next/link';
 
@@ -19,7 +18,6 @@ export default function DriverPage() {
   const [status, setStatus] = useState("Idle");
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const watchId = useRef<number | null>(null);
-  const { toast } = useToast();
   const router = useRouter();
 
   useEffect(() => {
@@ -36,44 +34,70 @@ export default function DriverPage() {
   };
 
 
-  const handleStartSharing = () => {
+  const handleStartSharing = async () => {
     if (!selectedBus) {
-      toast({ title: "Error", description: "Please select a bus first.", variant: "destructive" });
+      setStatus("No bus selected.");
       return;
     }
 
-    if (!navigator.geolocation) {
-      toast({ title: "Error", description: "Geolocation is not supported by your browser.", variant: "destructive" });
+    if (!("geolocation" in navigator)) {
+      setStatus("Geolocation not supported in this browser.");
       return;
     }
 
+    try {
+      // @ts-ignore
+      const permission = await navigator.permissions?.query?.({ name: "geolocation" });
+      if (permission && permission.state === "denied") {
+        setStatus("Location permission denied. Please enable location permissions.");
+        return;
+      }
+    } catch (e) {
+      // permission API is optional — ignore errors
+    }
+
+    setStatus("Starting location sharing...");
     const busRef = ref(database, `busLocations/${selectedBus}`);
-    
-    // Ensure location is removed if the driver disconnects unexpectedly
-    onDisconnect(busRef).remove();
 
     watchId.current = navigator.geolocation.watchPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
-        const newLocation = { lat: latitude, lng: longitude, timestamp: Date.now() };
-        set(busRef, newLocation);
-        setLocation({ lat: latitude, lng: longitude });
-        setIsSharing(true);
-        setStatus(`Sharing location for ${selectedBus}`);
+
+        const lat = typeof latitude === "number" ? latitude : Number(latitude);
+        const lng = typeof longitude === "number" ? longitude : Number(longitude);
+
+        const newLocation = {
+          lat,
+          lng,
+          timestamp: Date.now(),
+        };
+
+        set(busRef, newLocation)
+          .then(() => {
+            setLocation({ lat, lng });
+            setIsSharing(true);
+            setStatus(`Sharing location for ${selectedBus}`);
+          })
+          .catch((err) => {
+            console.error("Failed to write location:", err);
+            setStatus("Failed to share location (write error).");
+          });
       },
       (error) => {
-        let errorMessage = "An unknown error occurred.";
-        if (error.code === error.PERMISSION_DENIED) {
-            errorMessage = "Location access denied. Please enable location permissions in your browser settings.";
-        } else if (error.code === error.POSITION_UNAVAILABLE) {
-            errorMessage = "Location information is unavailable.";
-        } else if (error.code === error.TIMEOUT) {
-            errorMessage = "The request to get user location timed out.";
+        console.error("Geolocation watchPosition error:", error);
+        let errorMessage = "An unknown geolocation error occurred.";
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            errorMessage = "Location permission denied.";
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMessage = "Position unavailable.";
+            break;
+          case error.TIMEOUT:
+            errorMessage = "Location request timed out.";
+            break;
         }
-        toast({ title: "Location Error", description: errorMessage, variant: "destructive" });
-        setIsSharing(false);
-        setStatus("Error");
-        handleStopSharing();
+        setStatus(errorMessage);
       },
       {
         enableHighAccuracy: true,
@@ -88,23 +112,31 @@ export default function DriverPage() {
       navigator.geolocation.clearWatch(watchId.current);
       watchId.current = null;
     }
+
     if (selectedBus) {
       const busRef = ref(database, `busLocations/${selectedBus}`);
-      remove(busRef); // Remove location from Firebase
-      onDisconnect(busRef).cancel(); // Cancel the onDisconnect handler
+      set(busRef, null)
+        .then(() => {
+          setIsSharing(false);
+          setLocation(null);
+          setStatus(`Stopped sharing for ${selectedBus}`);
+        })
+        .catch((err) => {
+          console.error("Failed to remove bus location:", err);
+          setStatus("Failed to stop sharing (write error).");
+        });
+    } else {
+        setStatus("No bus selected.");
     }
-    setIsSharing(false);
-    setStatus("Idle. Select a bus to start sharing.");
-    setLocation(null);
   };
   
   useEffect(() => {
-    // Cleanup on component unmount
     return () => {
-      handleStopSharing();
+      if (watchId.current !== null) {
+        navigator.geolocation.clearWatch(watchId.current);
+      }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedBus]);
+  }, []);
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
