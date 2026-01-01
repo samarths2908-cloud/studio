@@ -1,40 +1,45 @@
 
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
-import { busRoutes } from '@/data/busRoutes';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { database } from '@/lib/firebase';
-import { ref, onValue, off } from 'firebase/database';
+import React, { useEffect, useMemo, useState, useRef } from "react";
+import { busRoutes, Stop } from "@/data/busRoutes";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { database } from "@/lib/firebase";
+import { ref, onValue, off } from "firebase/database";
 import DynamicMap from "@/components/DynamicMapWrapper";
-import { ArrowLeft, Map, Route } from 'lucide-react';
-import Link from 'next/link';
-import { cn } from '@/lib/utils';
-import { useMap } from 'react-leaflet';
+import Link from "next/link";
+import { ArrowLeft, Map, Route } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-const ONLINE_THRESHOLD_MS = 15000; // 15 seconds
-const ACTIVE_STOP_THRESHOLD_METERS = 500; // 500 meters
+// constants
+const ONLINE_THRESHOLD_MS = 15000; // 15s
+const ACTIVE_STOP_THRESHOLD_METERS = 500; // 500m
 
-type BusLocation = [number, number];
-type Stop = { id: string; name: string; coords: [number, number] };
+// types
+type BusLocation = [number, number]; // [lat, lng]
 
-// Haversine distance formula
+// haversine: returns meters
 const haversineDistance = (coords1: BusLocation, coords2: [number, number]): number => {
-  const toRad = (x: number) => (x * Math.PI) / 180;
-  const R = 6371e3;
-  const dLat = toRad(coords2[0] - coords1[0]);
-  const dLon = toRad(coords2[1] - coords1[1]);
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const R = 6371e3; // earth radius in meters
+
   const lat1 = toRad(coords1[0]);
   const lat2 = toRad(coords2[0]);
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const dLat = toRad(coords2[0] - coords1[0]);
+  const dLon = toRad(coords2[1] - coords1[1]);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 };
 
-// Custom hook to listen to Firebase for bus location
+// custom hook: listens for bus location in Firebase
 function useBusLocation(selectedBusId: string | null) {
   const [busLocation, setBusLocation] = useState<BusLocation | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
@@ -48,96 +53,111 @@ function useBusLocation(selectedBusId: string | null) {
 
     const busRef = ref(database, `busLocations/${selectedBusId}`);
 
-    const listener = onValue(busRef, (snapshot) => {
+    const callback = (snapshot: any) => {
       const data = snapshot.val();
       const isValidNumber = (v: any) => typeof v === "number" && Number.isFinite(v);
 
       if (data && isValidNumber(data.lat) && isValidNumber(data.lng) && isValidNumber(data.timestamp)) {
         const markerPosition: BusLocation = [Number(data.lat), Number(data.lng)];
+        // debug
+        console.log("Firebase busLocation:", data, "-> markerPosition:", markerPosition);
         setBusLocation(markerPosition);
         setLastUpdated(data.timestamp);
       } else {
         setBusLocation(null);
         setLastUpdated(null);
       }
-    });
+    };
+
+    onValue(busRef, callback);
 
     return () => {
-      off(busRef, "value", listener);
+      // remove all listeners from this ref (safe cleanup)
+      off(busRef);
     };
   }, [selectedBusId]);
 
   return { busLocation, lastUpdated };
 }
 
-
 export default function StudentPage() {
   const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
   const { busLocation, lastUpdated } = useBusLocation(selectedBusId);
   const [isBusOnline, setIsBusOnline] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('Offline');
+  const [statusMessage, setStatusMessage] = useState("Offline");
   const [activeStopId, setActiveStopId] = useState<string | null>(null);
+  const checkTimerRef = useRef<number | null>(null);
 
-  const selectedBusRoute: Stop[] | undefined = useMemo(() => 
-    selectedBusId ? busRoutes[selectedBusId] : undefined, 
-  [selectedBusId]);
+  const selectedBusRoute: Stop[] | undefined = useMemo(
+    () => (selectedBusId ? busRoutes[selectedBusId] : undefined),
+    [selectedBusId]
+  );
 
-  // Effect for online/offline status check using a timer
+  // default center (campus / reasonable default)
+  const defaultPosition: BusLocation = useMemo(() => [12.9017, 74.9995], []);
+
+  // online/offline status check (run periodically)
   useEffect(() => {
-    if (!lastUpdated) {
-      setIsBusOnline(false);
+    const checkStatus = () => {
+      if (!lastUpdated) {
+        setIsBusOnline(false);
+        return;
+      }
+      const diff = Date.now() - lastUpdated;
+      const online = diff <= ONLINE_THRESHOLD_MS;
+      setIsBusOnline(online);
+    };
+
+    // run once immediately then every 2s
+    checkStatus();
+    checkTimerRef.current = window.setInterval(checkStatus, 2000);
+
+    return () => {
+      if (checkTimerRef.current !== null) {
+        clearInterval(checkTimerRef.current);
+        checkTimerRef.current = null;
+      }
+    };
+  }, [lastUpdated]);
+
+  // find nearest stop to the busLocation and set active stop id
+  useEffect(() => {
+    if (!busLocation || !selectedBusRoute) {
+      setActiveStopId(null);
       return;
     }
 
-    const checkStatus = () => {
-        const difference = Date.now() - lastUpdated;
-        setIsBusOnline(difference <= ONLINE_THRESHOLD_MS);
-    };
+    let closestStop: Stop | null = null;
+    let minDistance = Infinity;
 
-    checkStatus();
-    const interval = setInterval(checkStatus, 2000);
-
-    return () => clearInterval(interval);
-  }, [lastUpdated]);
-
-  // Effect to find the nearest stop
-  useEffect(() => {
-    if (busLocation && selectedBusRoute) {
-      let closestStop: Stop | null = null;
-      let minDistance = Infinity;
-
-      selectedBusRoute.forEach(stop => {
-        const distance = haversineDistance(busLocation, stop.coords);
-        if (distance < minDistance) {
-          minDistance = distance;
-          closestStop = stop;
-        }
-      });
-
-      if (closestStop && minDistance <= ACTIVE_STOP_THRESHOLD_METERS) {
-        setActiveStopId(closestStop.id);
-      } else {
-        setActiveStopId(null);
+    for (const stop of selectedBusRoute) {
+      const distance = haversineDistance(busLocation, stop.coords);
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestStop = stop;
       }
+    }
+
+    if (closestStop && minDistance <= ACTIVE_STOP_THRESHOLD_METERS) {
+      setActiveStopId(closestStop.id);
     } else {
       setActiveStopId(null);
     }
   }, [busLocation, selectedBusRoute]);
 
-  // Effect to update the human-readable status message
+  // human readable status
   useEffect(() => {
     if (isBusOnline && lastUpdated) {
-      setStatusMessage(`Online (Updated: ${new Date(lastUpdated).toLocaleTimeString()})`);
+      const ageSec = Math.round((Date.now() - lastUpdated) / 1000);
+      setStatusMessage(`Online — ${ageSec}s ago`);
     } else {
-      setStatusMessage('Offline');
+      setStatusMessage("Offline");
     }
   }, [isBusOnline, lastUpdated]);
 
-  const defaultPosition: [number, number] = useMemo(() => [12.9017, 74.9995], []);
-
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b p-4">
+       <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b p-4">
         <div className="container mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4">
              <Link href="/">
@@ -150,9 +170,6 @@ export default function StudentPage() {
           <div className="w-full max-w-xs">
             <Select onValueChange={(value) => {
                 setSelectedBusId(value);
-                setBusLocation(null);
-                setLastUpdated(null);
-                setIsBusOnline(false);
                 setActiveStopId(null);
             }}>
               <SelectTrigger>
@@ -179,8 +196,8 @@ export default function StudentPage() {
                   <CardTitle>Live Bus Location</CardTitle>
                 </div>
                 {selectedBusId && (
-                  <div className={`text-sm flex items-center gap-2 ${isBusOnline ? 'text-green-600' : 'text-red-500'}`}>
-                    <span className={`h-2 w-2 rounded-full ${isBusOnline ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                  <div className={cn("text-sm flex items-center gap-2", isBusOnline ? 'text-green-600' : 'text-red-500')}>
+                    <span className={cn("h-2 w-2 rounded-full", isBusOnline ? 'bg-green-500' : 'bg-red-500')}></span>
                     {statusMessage}
                   </div>
                 )}
@@ -242,3 +259,4 @@ export default function StudentPage() {
   );
 }
 
+    

@@ -1,8 +1,12 @@
 
-export const busRoutes: Record<
-  string,
-  { id: string; name: string; coords: [number, number] }[]
-> = {
+// src/data/busRoutes.ts
+export type Stop = {
+  id: string;
+  name: string;
+  coords: [number, number];
+};
+
+export const busRoutes: Record<string, Stop[]> = {
   Bus1: [
     { id: "talapady", name: "Talapady (Checkpoint / Border)", coords: [12.7640, 74.8800] },
     { id: "beeri", name: "Beeri (Junction)", coords: [12.8092, 74.8864] },
@@ -110,3 +114,5 @@ export const busRoutes: Record<
     { id: "college", name: "Canara Engineering College", coords: [12.9017, 74.9995] },
   ],
 };
+
+    

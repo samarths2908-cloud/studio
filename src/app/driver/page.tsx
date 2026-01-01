@@ -8,9 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { database } from "@/lib/firebase";
-import { ref, set } from "firebase/database";
-import { LocateFixed, MapPin, Power, PowerOff, ArrowLeft, LogOut } from "lucide-react";
-import Link from 'next/link';
+import { ref, set, onDisconnect } from "firebase/database";
+import { useToast } from "@/hooks/use-toast";
+import { Power, PowerOff, ArrowLeft, LogOut, LocateFixed, MapPin } from "lucide-react";
+import Link from "next/link";
 
 export default function DriverPage() {
   const [selectedBus, setSelectedBus] = useState<string | null>(null);
@@ -18,6 +19,8 @@ export default function DriverPage() {
   const [status, setStatus] = useState("Idle");
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const watchId = useRef<number | null>(null);
+  const onDisconnectRef = useRef<any>(null);
+  const { toast } = useToast();
   const router = useRouter();
 
   useEffect(() => {
@@ -27,42 +30,48 @@ export default function DriverPage() {
     }
   }, [router]);
 
-  const handleLogout = () => {
-    sessionStorage.removeItem("driver_logged_in");
-    handleStopSharing();
-    router.push("/");
-  };
-
-
   const handleStartSharing = async () => {
     if (!selectedBus) {
+      toast({ title: "Error", description: "Please select a bus first.", variant: "destructive" });
       setStatus("No bus selected.");
       return;
     }
 
     if (!("geolocation" in navigator)) {
+      toast({ title: "Error", description: "Geolocation is not supported by your browser.", variant: "destructive" });
       setStatus("Geolocation not supported in this browser.");
       return;
     }
 
     try {
+      // optional permission check
       // @ts-ignore
-      const permission = await navigator.permissions?.query?.({ name: "geolocation" });
+      const permission = await (navigator as any).permissions?.query?.({ name: "geolocation" });
       if (permission && permission.state === "denied") {
         setStatus("Location permission denied. Please enable location permissions.");
+        toast({ title: "Error", description: "Location permission denied.", variant: "destructive" });
         return;
       }
-    } catch (e) {
-      // permission API is optional — ignore errors
+    } catch {
+      // ignore permission API errors
     }
 
     setStatus("Starting location sharing...");
     const busRef = ref(database, `busLocations/${selectedBus}`);
 
+    try {
+      const od = onDisconnect(busRef);
+      onDisconnectRef.current = od;
+      od.remove().catch((e: any) => {
+        console.warn("onDisconnect scheduling failed:", e);
+      });
+    } catch (err) {
+      console.warn("onDisconnect not available or failed:", err);
+    }
+
     watchId.current = navigator.geolocation.watchPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
-
         const lat = typeof latitude === "number" ? latitude : Number(latitude);
         const lng = typeof longitude === "number" ? longitude : Number(longitude);
 
@@ -81,6 +90,7 @@ export default function DriverPage() {
           .catch((err) => {
             console.error("Failed to write location:", err);
             setStatus("Failed to share location (write error).");
+            toast({ title: "Write Error", description: "Failed to update location to server.", variant: "destructive" });
           });
       },
       (error) => {
@@ -98,12 +108,10 @@ export default function DriverPage() {
             break;
         }
         setStatus(errorMessage);
+        setIsSharing(false);
+        toast({ title: "Location Error", description: errorMessage, variant: "destructive" });
       },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
-      }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   };
 
@@ -113,30 +121,53 @@ export default function DriverPage() {
       watchId.current = null;
     }
 
-    if (selectedBus) {
-      const busRef = ref(database, `busLocations/${selectedBus}`);
-      set(busRef, null)
-        .then(() => {
-          setIsSharing(false);
-          setLocation(null);
-          setStatus(`Stopped sharing for ${selectedBus}`);
-        })
-        .catch((err) => {
-          console.error("Failed to remove bus location:", err);
-          setStatus("Failed to stop sharing (write error).");
-        });
-    } else {
-        setStatus("No bus selected.");
+    if (!selectedBus) {
+      setStatus("No bus selected.");
+      return;
     }
+
+    const busRef = ref(database, `busLocations/${selectedBus}`);
+
+    try {
+      if (onDisconnectRef.current && typeof onDisconnectRef.current.cancel === "function") {
+        onDisconnectRef.current.cancel();
+      }
+    } catch (e) {
+      console.warn("Failed to cancel onDisconnect:", e);
+    }
+
+    set(busRef, null)
+      .then(() => {
+        setIsSharing(false);
+        setLocation(null);
+        setStatus(`Stopped sharing for ${selectedBus}`);
+      })
+      .catch((err) => {
+        console.error("Failed to remove bus location:", err);
+        setStatus("Failed to stop sharing (write error).");
+        toast({ title: "Write Error", description: "Failed to remove location from server.", variant: "destructive" });
+      });
   };
-  
+
   useEffect(() => {
     return () => {
       if (watchId.current !== null) {
         navigator.geolocation.clearWatch(watchId.current);
+        watchId.current = null;
+      }
+      if (selectedBus) {
+        const busRef = ref(database, `busLocations/${selectedBus}`);
+        set(busRef, null).catch(() => {});
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleLogout = () => {
+    sessionStorage.removeItem("driver_logged_in");
+    handleStopSharing();
+    router.push("/");
+  };
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -194,7 +225,7 @@ export default function DriverPage() {
           <Card className="bg-muted/50">
             <CardContent className="p-4">
               <p className="text-sm font-semibold text-foreground/80">Status</p>
-              <p className={`text-sm font-mono ${isSharing ? 'text-green-600' : 'text-muted-foreground'}`}>
+              <p className={cn("text-sm font-mono", isSharing ? 'text-green-600' : 'text-muted-foreground')}>
                 {status}
               </p>
               {location && isSharing && (
@@ -212,3 +243,5 @@ export default function DriverPage() {
     </div>
   );
 }
+
+    
