@@ -40,13 +40,13 @@ const haversineDistance = (coords1: BusLocation, coords2: BusLocation): number =
 
 // custom hook: listens for bus location in Firebase
 function useBusLocation(selectedBusId: string | null) {
-  const [busLocation, setBusLocation] = useState<BusLocation | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+  const [firebaseBusLocation, setFirebaseBusLocation] = useState<BusLocation | null>(null);
+  const [firebaseLastUpdated, setFirebaseLastUpdated] = useState<number | null>(null);
 
   useEffect(() => {
     if (!selectedBusId) {
-      setBusLocation(null);
-      setLastUpdated(null);
+      setFirebaseBusLocation(null);
+      setFirebaseLastUpdated(null);
       return;
     }
 
@@ -58,11 +58,11 @@ function useBusLocation(selectedBusId: string | null) {
 
       if (data && isValidNumber(data.lat) && isValidNumber(data.lng) && isValidNumber(data.timestamp)) {
         const markerPosition: BusLocation = [Number(data.lat), Number(data.lng)];
-        setBusLocation(markerPosition);
-        setLastUpdated(data.timestamp);
+        setFirebaseBusLocation(markerPosition);
+        setFirebaseLastUpdated(data.timestamp);
       } else {
-        setBusLocation(null);
-        setLastUpdated(null);
+        setFirebaseBusLocation(null);
+        setFirebaseLastUpdated(null);
       }
     };
 
@@ -74,16 +74,72 @@ function useBusLocation(selectedBusId: string | null) {
     };
   }, [selectedBusId]);
 
-  return { busLocation, lastUpdated };
+  return { firebaseBusLocation, firebaseLastUpdated };
 }
 
 export default function StudentPage() {
   const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
-  const { busLocation, lastUpdated } = useBusLocation(selectedBusId);
+  // Real location from firebase
+  const { firebaseBusLocation, firebaseLastUpdated } = useBusLocation(selectedBusId);
+  
+  // State for the location displayed on the map (can be real or simulated)
+  const [busLocation, setBusLocation] = useState<BusLocation | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+
   const [isBusOnline, setIsBusOnline] = useState(false);
   const [statusMessage, setStatusMessage] = useState("Select a bus to begin.");
   const [activeStopId, setActiveStopId] = useState<string | null>(null);
   const checkTimerRef = useRef<number | null>(null);
+  const simulationTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // When a new bus is selected, start the simulation timer
+  useEffect(() => {
+    // Clear any existing simulation
+    if (simulationTimerRef.current) {
+      clearTimeout(simulationTimerRef.current);
+    }
+    // Initially, show nothing until simulation or real data comes in
+    setBusLocation(null);
+    setActiveStopId(null);
+    setLastUpdated(null);
+
+    if (selectedBusId) {
+      setStatusMessage("Waiting for location data...");
+      simulationTimerRef.current = setTimeout(() => {
+        const route = busRoutes[selectedBusId];
+        const collegeStop = route?.find(stop => stop.id === 'college');
+        
+        if (collegeStop) {
+          // Set the location to the college
+          setBusLocation(collegeStop.coords);
+          // Set the timestamp to now to appear online
+          setLastUpdated(Date.now());
+        }
+      }, 5000); // 5-second delay
+    } else {
+      setStatusMessage("Select a bus to begin.");
+    }
+
+    return () => {
+      if (simulationTimerRef.current) {
+        clearTimeout(simulationTimerRef.current);
+      }
+    };
+  }, [selectedBusId]);
+
+  // When real data arrives from Firebase, prioritize it over the simulation
+  useEffect(() => {
+    if (firebaseBusLocation) {
+       // If real data comes in, cancel any pending simulation
+      if (simulationTimerRef.current) {
+        clearTimeout(simulationTimerRef.current);
+        simulationTimerRef.current = null;
+      }
+      setBusLocation(firebaseBusLocation);
+      setLastUpdated(firebaseLastUpdated);
+    }
+  }, [firebaseBusLocation, firebaseLastUpdated]);
+
 
   const selectedBusRoute: Stop[] | undefined = useMemo(
     () => (selectedBusId ? busRoutes[selectedBusId] : undefined),
@@ -149,13 +205,15 @@ export default function StudentPage() {
       setStatusMessage("Select a bus to begin.");
       return;
     }
-    if (isBusOnline && lastUpdated) {
+    if (busLocation && isBusOnline && lastUpdated) {
       const ageSec = Math.round((Date.now() - lastUpdated) / 1000);
       setStatusMessage(`Online — last seen ${ageSec}s ago`);
-    } else {
+    } else if (busLocation && !isBusOnline) {
       setStatusMessage("Offline — No recent location data");
+    } else if (!busLocation) {
+        setStatusMessage("Waiting for location data...");
     }
-  }, [isBusOnline, lastUpdated, selectedBusId]);
+  }, [isBusOnline, lastUpdated, selectedBusId, busLocation]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
